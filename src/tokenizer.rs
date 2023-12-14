@@ -2,7 +2,7 @@ use compact_str::{CompactString, ToCompactString};
 use thiserror::Error;
 
 #[derive(Debug, Default)]
-pub enum TokenizerState {
+enum TokenizerState {
     #[default]
     Clean,
     InNumber {

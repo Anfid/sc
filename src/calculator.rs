@@ -2,7 +2,7 @@ use crate::tokenizer::{Operation, Token, Value};
 use thiserror::Error;
 
 #[derive(Debug, Default)]
-pub enum CalculatorState {
+enum CalculatorState {
     #[default]
     Empty,
     Neg,
@@ -52,8 +52,8 @@ impl Calculator {
         self.pending.push(new);
     }
 
-    pub fn finalize(mut self) -> Result<Value, CalculatorError> {
-        match self.state {
+    pub fn finalize(&mut self) -> Result<Value, CalculatorError> {
+        let result = match self.state {
             CalculatorState::Empty => Err(CalculatorError::NumberExpected),
             CalculatorState::Neg => Err(CalculatorError::NumberExpected),
             CalculatorState::Value(mut v) => {
@@ -62,7 +62,10 @@ impl Calculator {
                 }
                 Ok(v)
             }
-        }
+        };
+        self.state = CalculatorState::Empty;
+        self.pending.clear();
+        result
     }
 }
 
