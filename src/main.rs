@@ -49,7 +49,7 @@ fn run() -> Result<(), Error> {
         }
 
         for expr in reader.lines() {
-            for char in expr?.chars().chain(std::iter::once(' ')) {
+            for char in expr?.chars() {
                 tokenizer
                     .update(char)?
                     .map(|t| calculator.handle_token(t))
