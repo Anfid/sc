@@ -1,5 +1,7 @@
-use crate::tokenizer::{Operation, Token, Value};
+use crate::tokenizer::{Operator, Token, Value};
 use thiserror::Error;
+
+use CalculatorState::*;
 
 #[derive(Debug, Default)]
 enum CalculatorState {
@@ -17,78 +19,118 @@ pub struct Calculator {
 
 impl Calculator {
     pub fn handle_token(&mut self, token: Token) -> Result<(), CalculatorError> {
-        use CalculatorState::*;
         use Token::*;
 
         match (&self.state, token) {
             (Empty, Val(v)) => self.state = Value(v),
             (Neg, Val(v)) => self.state = Value(-v),
             // Negative sign
-            (Empty, Op(Operation::Sub)) => self.state = Neg,
+            (Empty, Op(Operator::Sub)) => self.state = Neg,
             // Double negative sign, cancel each other out
-            (Neg, Op(Operation::Sub)) => self.state = Empty,
+            (Neg, Op(Operator::Sub)) => self.state = Empty,
             // Positive sign, do nothing
-            (Empty | Neg, Op(Operation::Add)) => {}
-            (Empty | Neg, Op(_)) => return Err(CalculatorError::NumberExpected),
+            (Empty | Neg, Op(Operator::Add)) => {}
+            (Empty | Neg, Op(_) | ParenClose) => return Err(CalculatorError::NumberExpected),
+            (Empty, ParenOpen) => self.pending.push(Action::Parentheses(false)),
+            (Neg, ParenOpen) => self.pending.push(Action::Parentheses(true)),
             (Value(_), Val(_)) => return Err(CalculatorError::OperationExpected),
             (Value(v), Op(op)) => {
-                self.prioritized_execute(Action { l: *v, op });
+                self.prioritized_execute(Operation { l: *v, op });
                 self.state = Empty;
             }
+            (Value(v), ParenOpen) => {
+                self.pending.push(Action::Operation(Operation {
+                    l: *v,
+                    op: Operator::Mul,
+                }));
+                self.pending.push(Action::Parentheses(false));
+            }
+            (Value(_), ParenClose) => self.finalize_expr()?,
         }
 
         Ok(())
     }
 
-    fn prioritized_execute(&mut self, mut new: Action) {
-        while self
-            .pending
-            .last()
-            .map(|pending| pending.priority() >= new.priority())
-            .unwrap_or(false)
-        {
-            new.l = self.pending.pop().unwrap().execute(new.l);
+    fn prioritized_execute(&mut self, mut new: Operation) {
+        while let Some(pending) = self.pending.pop() {
+            match pending {
+                Action::Operation(op) if op.priority() >= new.priority() => {
+                    new.l = op.execute(new.l)
+                }
+                _ => {
+                    self.pending.push(pending);
+                    break;
+                }
+            }
         }
-        self.pending.push(new);
+        self.pending.push(Action::Operation(new));
+    }
+
+    fn finalize_expr(&mut self) -> Result<(), CalculatorError> {
+        match self.state {
+            Empty | Neg => Err(CalculatorError::NumberExpected),
+            Value(mut v) => {
+                while let Some(pending) = self.pending.pop() {
+                    match pending {
+                        Action::Parentheses(is_negative) => {
+                            v = if is_negative { -v } else { v };
+                            break;
+                        }
+                        Action::Operation(op) => v = op.execute(v),
+                    }
+                }
+                self.state = Value(v);
+                Ok(())
+            }
+        }
     }
 
     pub fn finalize(&mut self) -> Result<Value, CalculatorError> {
+        self.finalize_expr()?;
         let result = match self.state {
-            CalculatorState::Empty => Err(CalculatorError::NumberExpected),
-            CalculatorState::Neg => Err(CalculatorError::NumberExpected),
-            CalculatorState::Value(mut v) => {
-                while let Some(pending) = self.pending.pop() {
-                    v = pending.execute(v);
-                }
-                Ok(v)
-            }
+            Empty | Neg => Err(CalculatorError::NumberExpected),
+            Value(v) => Ok(v),
         };
-        self.state = CalculatorState::Empty;
-        self.pending.clear();
+        self.state = Empty;
+
+        if !self.pending.is_empty() {
+            return Err(CalculatorError::UnmatchedParen);
+        }
+
         result
     }
 }
 
 #[derive(Debug)]
-struct Action {
-    l: Value,
-    op: Operation,
+enum Action {
+    Parentheses(bool),
+    Operation(Operation),
 }
 
-impl Action {
+#[derive(Debug)]
+struct Operation {
+    l: Value,
+    op: Operator,
+}
+
+impl Operation {
     fn execute(self, r: Value) -> Value {
         match self.op {
-            Operation::Add => self.l + r,
-            Operation::Sub => self.l - r,
-            Operation::Mul => self.l * r,
-            Operation::Div => self.l / r,
+            Operator::Add => self.l + r,
+            Operator::Sub => self.l - r,
+            Operator::Mul => self.l * r,
+            // TODO: Sane div/0 handling, return NaN
+            Operator::Div => self.l.checked_div(r).unwrap_or(0),
+            // TODO: Validate POW number
+            Operator::Pow => self.l.pow(r as u32),
         }
     }
 
     fn priority(&self) -> u8 {
         match self.op {
-            Operation::Add | Operation::Sub => 10,
-            Operation::Mul | Operation::Div => 20,
+            Operator::Add | Operator::Sub => 10,
+            Operator::Mul | Operator::Div => 20,
+            Operator::Pow => 30,
         }
     }
 }
@@ -99,4 +141,6 @@ pub enum CalculatorError {
     NumberExpected,
     #[error("Operation expected")]
     OperationExpected,
+    #[error("Unmatched parentheses")]
+    UnmatchedParen,
 }

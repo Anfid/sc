@@ -35,14 +35,12 @@ impl Tokenizer {
                     };
                     Ok(None)
                 }
-                '+' | '-' | '*' | '/' => {
+                // Ignore whitespace
+                _ if c.is_whitespace() => Ok(None),
+                _ => {
                     self.state = InOperator(c.to_compact_string());
                     Ok(None)
                 }
-                // Ignore whitespace
-                _ if c.is_whitespace() => Ok(None),
-                // Unknown token
-                _ => return Err(TokenizeError::UnexpectedToken),
             },
             InNumber { mut value, radix } => match c {
                 'x' if value == 0 && radix == 8 => {
@@ -72,7 +70,7 @@ impl Tokenizer {
             },
             InOperator(ref mut op) => {
                 // Pop potential unary operators early
-                if matches!(op.as_str(), "+" | "-") {
+                if matches!(op.as_str(), "+" | "-" | "(" | ")" | "*" | "/") {
                     // FIXME: looks messy
                     let token = self.finalize()?;
                     self.update(c)?;
@@ -85,12 +83,11 @@ impl Tokenizer {
                             self.update(c)?;
                             Ok(token)
                         }
-                        '+' | '-' | '*' | '/' => {
+                        _ if c.is_whitespace() => self.finalize(),
+                        _ => {
                             op.push(c);
                             Ok(None)
                         }
-                        _ if c.is_whitespace() => self.finalize(),
-                        _ => Err(TokenizeError::UnexpectedToken),
                     }
                 }
             }
@@ -99,26 +96,40 @@ impl Tokenizer {
 
     pub fn finalize(&mut self) -> Result<Option<Token>, TokenizeError> {
         use TokenizerState::*;
-        let token = match &self.state {
+        let token = match &mut self.state {
             Clean => None,
             InNumber { value, .. } => Some(Token::Val(*value)),
-            InOperator(op) => match op.as_str() {
-                "+" => Some(Token::Op(Operation::Add)),
-                "-" => Some(Token::Op(Operation::Sub)),
-                "*" => Some(Token::Op(Operation::Mul)),
-                "/" => Some(Token::Op(Operation::Div)),
-                _ => return Err(TokenizeError::UnknownOperation(op.clone())),
-            },
+            InOperator(ref mut op) => {
+                if let Some(token) = detect_operator(op) {
+                    Some(token)
+                } else {
+                    return Err(TokenizeError::UnknownOperation(op.clone()));
+                }
+            }
         };
         self.state = Clean;
         Ok(token)
     }
 }
 
+// TODO: handle ambiguous operators
+fn detect_operator(op: &mut CompactString) -> Option<Token> {
+    match op.as_str() {
+        "+" => Some(Token::Op(Operator::Add)),
+        "-" => Some(Token::Op(Operator::Sub)),
+        "/" => Some(Token::Op(Operator::Div)),
+        "(" => Some(Token::ParenOpen),
+        ")" => Some(Token::ParenClose),
+        // TODO: Rework
+        "*" => Some(Token::Op(Operator::Mul)),
+        "**" => Some(Token::Op(Operator::Pow)),
+        _ if op.starts_with("*") => Some(Token::Op(Operator::Mul)),
+        _ => None,
+    }
+}
+
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum TokenizeError {
-    #[error("Unexpected token")]
-    UnexpectedToken,
     #[error("Invalid number")]
     InvalidNumber,
     #[error("Unknown operation: {0}")]
@@ -128,15 +139,18 @@ pub enum TokenizeError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Token {
     Val(Value),
-    Op(Operation),
+    Op(Operator),
+    ParenOpen,
+    ParenClose,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Operation {
+pub enum Operator {
     Add,
     Sub,
     Mul,
     Div,
+    Pow,
 }
 
 pub type Value = i64;
@@ -165,10 +179,10 @@ mod tests {
         assert_eq!(
             result,
             Ok(vec![
-                Token::Op(Operation::Sub),
+                Token::Op(Operator::Sub),
                 Token::Val(12),
-                Token::Op(Operation::Sub),
-                Token::Op(Operation::Sub),
+                Token::Op(Operator::Sub),
+                Token::Op(Operator::Sub),
                 Token::Val(34)
             ])
         );
