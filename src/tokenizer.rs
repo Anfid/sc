@@ -5,6 +5,7 @@ use thiserror::Error;
 enum TokenizerState {
     #[default]
     Clean,
+    Pending(Token),
     InNumber {
         value: i64,
         radix: u32,
@@ -22,19 +23,14 @@ impl Tokenizer {
         use TokenizerState::*;
 
         match self.state {
-            Clean => {
+            Clean => self.state = begin_token(c),
+            Pending(token) => {
                 self.state = begin_token(c);
-                Ok(None)
+                return Ok(Some(token));
             }
             InNumber { mut value, radix } => match c {
-                'x' if value == 0 && radix == 8 => {
-                    self.state = InNumber { value, radix: 16 };
-                    Ok(None)
-                }
-                'b' if value == 0 && radix == 8 => {
-                    self.state = InNumber { value, radix: 2 };
-                    Ok(None)
-                }
+                'x' if value == 0 && radix == 8 => self.state = InNumber { value, radix: 16 },
+                'b' if value == 0 && radix == 8 => self.state = InNumber { value, radix: 2 },
                 '0'..='9' | 'a'..='z' | 'A'..='Z' => {
                     value *= radix as i64;
                     let Some(digit) = c.to_digit(radix) else {
@@ -42,49 +38,36 @@ impl Tokenizer {
                     };
                     value += digit as i64;
                     self.state = InNumber { value, radix };
-                    Ok(None)
                 }
-                _ if c.is_whitespace() => self.finalize(),
+                _ if c.is_whitespace() => return Ok(Some(Token::Val(value))),
                 c => {
-                    // FIXME: looks messy
-                    let token = self.finalize()?;
+                    let token = Token::Val(value);
                     self.state = begin_token(c);
-                    Ok(token)
+                    return Ok(Some(token));
                 }
             },
-            InOperator(ref mut op) => {
-                // Pop potential unary operators early
-                if matches!(op.as_str(), "+" | "-" | "(" | ")" | "*" | "/") {
-                    // FIXME: looks messy
-                    let token = self.finalize()?;
+            InOperator(ref mut op) => match c {
+                '0'..='9' | '+' | '-' | '(' | ')' | 'a'..='z' | 'A'..='Z' => {
+                    let token = finalize_operator(op.as_str())
+                        .ok_or_else(|| TokenizeError::UnknownOperation(op.clone()))?;
                     self.state = begin_token(c);
-                    Ok(token)
-                } else {
-                    match c {
-                        '0'..='9' => {
-                            // FIXME: looks messy
-                            let token = self.finalize()?;
-                            self.state = begin_token(c);
-                            Ok(token)
-                        }
-                        _ if c.is_whitespace() => self.finalize(),
-                        _ => {
-                            op.push(c);
-                            Ok(None)
-                        }
-                    }
+                    return Ok(Some(token));
                 }
-            }
+                _ => op.push(c),
+            },
         }
+        Ok(None)
     }
 
     pub fn finalize(&mut self) -> Result<Option<Token>, TokenizeError> {
         use TokenizerState::*;
-        let token = match &mut self.state {
+        let token = match &self.state {
             Clean => None,
+            Pending(token) => Some(token.clone()),
             InNumber { value, .. } => Some(Token::Val(*value)),
-            InOperator(ref mut op) => {
-                if let Some(token) = detect_operator(op) {
+            InOperator(op) => {
+                // TODO
+                if let Some(token) = finalize_operator(op.as_str()) {
                     Some(token)
                 } else {
                     return Err(TokenizeError::UnknownOperation(op.clone()));
@@ -104,24 +87,25 @@ fn begin_token(c: char) -> TokenizerState {
             value: c as i64 - '0' as i64,
             radix: 10,
         },
+        '+' => TokenizerState::Pending(Token::Op(Operator::Add)),
+        '-' => TokenizerState::Pending(Token::Op(Operator::Sub)),
+        '(' => TokenizerState::Pending(Token::ParenOpen),
+        ')' => TokenizerState::Pending(Token::ParenClose),
         // Ignore whitespace
         _ if c.is_whitespace() => TokenizerState::Clean,
         _ => TokenizerState::InOperator(c.to_compact_string()),
     }
 }
 
-// TODO: handle ambiguous operators
-fn detect_operator(op: &mut CompactString) -> Option<Token> {
-    match op.as_str() {
+fn finalize_operator(op: &str) -> Option<Token> {
+    match op {
         "+" => Some(Token::Op(Operator::Add)),
         "-" => Some(Token::Op(Operator::Sub)),
         "/" => Some(Token::Op(Operator::Div)),
         "(" => Some(Token::ParenOpen),
         ")" => Some(Token::ParenClose),
-        // TODO: Rework
         "*" => Some(Token::Op(Operator::Mul)),
         "**" => Some(Token::Op(Operator::Pow)),
-        _ if op.starts_with("*") => Some(Token::Op(Operator::Mul)),
         _ => None,
     }
 }
