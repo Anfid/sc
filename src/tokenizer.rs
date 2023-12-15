@@ -22,26 +22,10 @@ impl Tokenizer {
         use TokenizerState::*;
 
         match self.state {
-            Clean => match c {
-                // 0b = binary, 0 = oct, 0x = hex
-                '0' => {
-                    self.state = InNumber { value: 0, radix: 8 };
-                    Ok(None)
-                }
-                '1'..='9' => {
-                    self.state = InNumber {
-                        value: c as i64 - '0' as i64,
-                        radix: 10,
-                    };
-                    Ok(None)
-                }
-                // Ignore whitespace
-                _ if c.is_whitespace() => Ok(None),
-                _ => {
-                    self.state = InOperator(c.to_compact_string());
-                    Ok(None)
-                }
-            },
+            Clean => {
+                self.state = begin_token(c);
+                Ok(None)
+            }
             InNumber { mut value, radix } => match c {
                 'x' if value == 0 && radix == 8 => {
                     self.state = InNumber { value, radix: 16 };
@@ -64,7 +48,7 @@ impl Tokenizer {
                 c => {
                     // FIXME: looks messy
                     let token = self.finalize()?;
-                    self.update(c)?;
+                    self.state = begin_token(c);
                     Ok(token)
                 }
             },
@@ -73,14 +57,14 @@ impl Tokenizer {
                 if matches!(op.as_str(), "+" | "-" | "(" | ")" | "*" | "/") {
                     // FIXME: looks messy
                     let token = self.finalize()?;
-                    self.update(c)?;
+                    self.state = begin_token(c);
                     Ok(token)
                 } else {
                     match c {
                         '0'..='9' => {
                             // FIXME: looks messy
                             let token = self.finalize()?;
-                            self.update(c)?;
+                            self.state = begin_token(c);
                             Ok(token)
                         }
                         _ if c.is_whitespace() => self.finalize(),
@@ -109,6 +93,20 @@ impl Tokenizer {
         };
         self.state = Clean;
         Ok(token)
+    }
+}
+
+fn begin_token(c: char) -> TokenizerState {
+    match c {
+        // 0b = binary, 0 = oct, 0x = hex
+        '0' => TokenizerState::InNumber { value: 0, radix: 8 },
+        '1'..='9' => TokenizerState::InNumber {
+            value: c as i64 - '0' as i64,
+            radix: 10,
+        },
+        // Ignore whitespace
+        _ if c.is_whitespace() => TokenizerState::Clean,
+        _ => TokenizerState::InOperator(c.to_compact_string()),
     }
 }
 
