@@ -24,7 +24,10 @@ impl Tokenizer {
         match self.state {
             Clean => match c {
                 // 0b = binary, 0 = oct, 0x = hex
-                '0' => todo!("Only base 10 numbers are supported"),
+                '0' => {
+                    self.state = InNumber { value: 0, radix: 8 };
+                    Ok(None)
+                }
                 '1'..='9' => {
                     self.state = InNumber {
                         value: c as i64 - '0' as i64,
@@ -42,6 +45,14 @@ impl Tokenizer {
                 _ => return Err(TokenizeError::UnexpectedToken),
             },
             InNumber { mut value, radix } => match c {
+                'x' if value == 0 && radix == 8 => {
+                    self.state = InNumber { value, radix: 16 };
+                    Ok(None)
+                }
+                'b' if value == 0 && radix == 8 => {
+                    self.state = InNumber { value, radix: 2 };
+                    Ok(None)
+                }
                 '0'..='9' | 'a'..='z' | 'A'..='Z' => {
                     value *= radix as i64;
                     let Some(digit) = c.to_digit(radix) else {
