@@ -185,4 +185,48 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn test_parentheses() {
+        let result = tokenize("(-2)");
+        assert_eq!(
+            result,
+            Ok(vec![
+                Token::ParenOpen,
+                Token::Op(Operator::Sub),
+                Token::Val(2),
+                Token::ParenClose
+            ])
+        );
+    }
+
+    #[test]
+    fn test_non_decimal() {
+        let result = tokenize("0");
+        assert_eq!(result, Ok(vec![Token::Val(0),]));
+
+        let result = tokenize("123456789");
+        assert_eq!(result, Ok(vec![Token::Val(123456789),]));
+
+        let result = tokenize("123456789A");
+        assert_eq!(result, Err(TokenizeError::InvalidNumber));
+
+        let result = tokenize("0x123456789abcdef");
+        assert_eq!(result, Ok(vec![Token::Val(0x123456789abcdef),]));
+
+        let result = tokenize("0x123456789abcdefg");
+        assert_eq!(result, Err(TokenizeError::InvalidNumber));
+
+        let result = tokenize("0b10");
+        assert_eq!(result, Ok(vec![Token::Val(0b10),]));
+
+        let result = tokenize("0b102");
+        assert_eq!(result, Err(TokenizeError::InvalidNumber));
+
+        let result = tokenize("01234567");
+        assert_eq!(result, Ok(vec![Token::Val(0o1234567),]));
+
+        let result = tokenize("012345678");
+        assert_eq!(result, Err(TokenizeError::InvalidNumber));
+    }
 }
