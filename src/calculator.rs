@@ -1,9 +1,10 @@
 use crate::tokenizer::{Operator, Token, Value};
+use malachite::num::arithmetic::traits::Pow;
 use thiserror::Error;
 
 use CalculatorState::*;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 enum CalculatorState {
     #[default]
     Empty,
@@ -38,12 +39,12 @@ impl Calculator {
             }
             (Value(_), Val(_)) => return Err(CalculatorError::OperationExpected),
             (Value(v), Op(op)) => {
-                self.prioritized_execute(Operation { l: *v, op });
+                self.prioritized_execute(Operation { l: v.clone(), op });
                 self.state = Empty;
             }
             (Value(v), ParenOpen) => {
                 self.pending.push(Action::Operation(Operation {
-                    l: *v,
+                    l: v.clone(),
                     op: Operator::Mul,
                 }));
                 self.pending.push(Action::Parentheses(false));
@@ -71,7 +72,7 @@ impl Calculator {
     }
 
     fn finalize_expr(&mut self) -> Result<(), CalculatorError> {
-        match self.state {
+        match self.state.clone() {
             Empty | Neg => Err(CalculatorError::NumberExpected),
             Value(mut v) => {
                 while let Some(pending) = self.pending.pop() {
@@ -91,7 +92,7 @@ impl Calculator {
 
     pub fn finalize(&mut self) -> Result<Value, CalculatorError> {
         self.finalize_expr()?;
-        let result = match self.state {
+        let result = match self.state.clone() {
             Empty | Neg => Err(CalculatorError::NumberExpected),
             Value(v) => Ok(v),
         };
@@ -124,9 +125,15 @@ impl Operation {
             Operator::Sub => self.l - r,
             Operator::Mul => self.l * r,
             // TODO: Sane div/0 handling, return NaN
-            Operator::Div => self.l.checked_div(r).unwrap_or(0),
+            Operator::Div => {
+                if r == 0 {
+                    0.into()
+                } else {
+                    self.l / r
+                }
+            }
             // TODO: Validate POW number
-            Operator::Pow => self.l.pow(r as u32),
+            Operator::Pow => self.l.pow(r.to_twos_complement_limbs_asc()[0]),
         }
     }
 
