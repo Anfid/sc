@@ -39,7 +39,6 @@ impl Tokenizer {
                     value += digit as i64;
                     self.state = InNumber { value, radix };
                 }
-                _ if c.is_whitespace() => return Ok(Some(Token::Val(value))),
                 c => {
                     let token = Token::Val(value);
                     self.state = begin_token(c);
@@ -51,6 +50,12 @@ impl Tokenizer {
                     let token = finalize_operator(op.as_str())
                         .ok_or_else(|| TokenizeError::UnknownOperation(op.clone()))?;
                     self.state = begin_token(c);
+                    return Ok(Some(token));
+                }
+                _ if c.is_whitespace() => {
+                    let token = finalize_operator(op.as_str())
+                        .ok_or_else(|| TokenizeError::UnknownOperation(op.clone()))?;
+                    self.state = Clean;
                     return Ok(Some(token));
                 }
                 _ => op.push(c),

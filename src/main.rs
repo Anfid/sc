@@ -50,13 +50,14 @@ fn run() -> Result<(), Error> {
 
         for expr in reader.lines() {
             for char in expr?.chars() {
-                tokenizer
-                    .update(char)?
-                    .map(|t| calculator.handle_token(t))
-                    .transpose()?;
+                if let Some(t) = tokenizer.update(char)? {
+                    calculator.handle_token(t)?;
+                }
             }
 
-            tokenizer.finalize()?.map(|t| calculator.handle_token(t));
+            if let Some(t) = tokenizer.finalize()? {
+                calculator.handle_token(t)?;
+            }
             let result = calculator.finalize()?;
 
             writeln!(&mut w, "{}", result)?;
