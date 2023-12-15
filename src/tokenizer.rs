@@ -131,6 +131,12 @@ pub enum Token {
     ParenClose,
 }
 
+impl From<i64> for Token {
+    fn from(value: i64) -> Self {
+        Token::Val(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Operator {
     Add,
@@ -158,6 +164,24 @@ mod tests {
             tokens.push(token)
         }
         Ok(tokens)
+    }
+
+    #[test]
+    fn test_spaces() {
+        let result = tokenize(" -  2  +  (  4  )  *    10");
+        assert_eq!(
+            result,
+            Ok(vec![
+                Token::Op(Operator::Sub),
+                Token::from(2),
+                Token::Op(Operator::Add),
+                Token::ParenOpen,
+                Token::from(4),
+                Token::ParenClose,
+                Token::Op(Operator::Mul),
+                Token::from(10),
+            ])
+        );
     }
 
     #[test]

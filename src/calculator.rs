@@ -32,7 +32,10 @@ impl Calculator {
             (Empty | Neg, Op(Operator::Add)) => {}
             (Empty | Neg, Op(_) | ParenClose) => return Err(CalculatorError::NumberExpected),
             (Empty, ParenOpen) => self.pending.push(Action::Parentheses(false)),
-            (Neg, ParenOpen) => self.pending.push(Action::Parentheses(true)),
+            (Neg, ParenOpen) => {
+                self.pending.push(Action::Parentheses(true));
+                self.state = Empty
+            }
             (Value(_), Val(_)) => return Err(CalculatorError::OperationExpected),
             (Value(v), Op(op)) => {
                 self.prioritized_execute(Operation { l: *v, op });
@@ -44,6 +47,7 @@ impl Calculator {
                     op: Operator::Mul,
                 }));
                 self.pending.push(Action::Parentheses(false));
+                self.state = Empty;
             }
             (Value(_), ParenClose) => self.finalize_expr()?,
         }
@@ -143,4 +147,31 @@ pub enum CalculatorError {
     OperationExpected,
     #[error("Unmatched parentheses")]
     UnmatchedParen,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ADD: Token = Token::Op(Operator::Add);
+    const SUB: Token = Token::Op(Operator::Sub);
+    const MUL: Token = Token::Op(Operator::Mul);
+    const OP: Token = Token::ParenOpen;
+    const CL: Token = Token::ParenClose;
+
+    fn calculate(tokens: Vec<Token>) -> Result<Value, CalculatorError> {
+        let mut calculator = Calculator::default();
+
+        for t in tokens {
+            calculator.handle_token(t)?;
+        }
+        calculator.finalize()
+    }
+
+    #[test]
+    fn test_negative_braces() {
+        // 2 * -(2 + 2)
+        let res = calculate(vec![2.into(), MUL, SUB, OP, 2.into(), ADD, 2.into(), CL]);
+        assert_eq!(res, Ok(-8));
+    }
 }
